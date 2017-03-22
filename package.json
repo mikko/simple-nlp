@@ -1,0 +1,17 @@
+{
+  "name": "nlp-moneypenny",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "lodash": "^4.17.4",
+    "node-wordnet": "^0.1.12",
+    "spacy-nlp": "^1.0.7",
+    "wndb-with-exceptions": "^3.0.1"
+  }
+}
