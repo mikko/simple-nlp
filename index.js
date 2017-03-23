@@ -23,16 +23,14 @@ const isRelevantPointer = (type, pointer) => {
   return isSameType && isRelevantSymbol;
 };
 
-const resolvePointers = (type, token) => {
-  const pointers = token.ptrs || [];
-  //console.log("Pointers", pointers.length);
+const resolvePointers = (type, word) => {
+  const pointers = word.ptrs || [];
   const pointerPromises = pointers
     .filter(ptr => isRelevantPointer(type, ptr)) // Remove pointers we are not curious about
-    .map(ptr => wordnet.getAsync(ptr.synsetOffset, ptr.pos).then(p => Promise.resolve(p /*_.pick(p, constants.wordnetKeys)*/)));
-  //console.log("Pointer promises", pointerPromises.length);
+    .map(ptr => wordnet.getAsync(ptr.synsetOffset, ptr.pos).then(p => Promise.resolve(_.pick(p, constants.wordnetKeys))));
   return Promise.all(pointerPromises)
     .then(resolvedPointers => {
-      return Promise.resolve(Object.assign(_.pick(token, constants.wordnetKeys), { pointers: resolvedPointers }))
+      return Promise.resolve(Object.assign(_.pick(word, constants.wordnetKeys), { pointers: resolvedPointers }))
     });
 };
 
@@ -48,13 +46,18 @@ const analyzePhrase = phrase => {
   console.log("analyzePhrase");
   return nlp.parse(phrase)
     .then(output => {
-      const tokens = output[0].parse_list;
-      console.log(JSON.stringify(tokens, null, 2));
+      const phraseWords = output[0].parse_list;
+      console.log(JSON.stringify(phraseWords, null, 2));
       const analysis = {};
-      return Promise.all(tokens.map(token => {
-        return analyzeToken(token)
-          .then(tokenAnalysis => Promise.all(tokenAnalysis.map(t => resolvePointers(token.POS_coarse, t))))
-          .then(resolvedPointers => Promise.resolve(Object.assign(token, { pointers: resolvedPointers })));
+      return Promise.all(phraseWords.map(word => {
+        return analyzeToken(word)
+          .then(wordAnalysis => {
+            const pointerPromises = wordAnalysis
+              .filter(relatedWord => constants.posMap[word.POS_coarse] === relatedWord.pos)
+              .map(relatedWord => resolvePointers(word.POS_coarse, relatedWord));
+            return Promise.all(pointerPromises)
+          })
+          .then(resolvedWords => Promise.resolve({ originalWord: word, relatedWords: resolvedWords }));
       }));
     })
     .then(analysis => {
@@ -76,9 +79,10 @@ const askAndAnalyze = () => {
   rl.question('Next phrase? ', (answer) => {
     // TODO: Log the answer in a database
     console.log(`Analyzing: ${answer}`);
+    const start = new Date().getTime();
     analyzePhrase(answer)
       .then(() => {
-        
+        console.log('Analysis took', (new Date().getTime() - start) / 1000, 's');
         askAndAnalyze()
       });
     rl.close();
@@ -88,28 +92,6 @@ const askAndAnalyze = () => {
 
 setTimeout(() => {
   askAndAnalyze();
-  /*
-  nlp.parse(testMessage)
-    .then(output => {
-      const tokens = output[0].parse_list;
-      console.log(JSON.stringify(tokens, null, 2));
-      const analysis = {};
-      return Promise.all(tokens.map(token => {
-        return analyzeToken(token)
-          .then(tokenAnalysis => Promise.all(tokenAnalysis.map(t => resolvePointers(token.POS_coarse, t))))
-          .then(resolvedPointers => Promise.resolve(Object.assign(token, { pointers: resolvedPointers })));
-      }));
-    })
-    .then(analysis => {
-      const report = {
-        originalMessage: testMessage,
-        analysis
-      };
-      require('fs').writeFileSync('analysis.json', JSON.stringify(report, null, 2));
-      process.exit();
-    });
-*/
-  
 }, safeStartupTime);
 
 const test = () => {
