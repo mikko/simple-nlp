@@ -1,21 +1,17 @@
+// POS descriptions http://www.clips.ua.ac.be/pages/mbsp-tags
+
 const _ = require('lodash');
 const spacyNLP = require('spacy-nlp');
 const WordNet = require('node-wordnet');
 const constants = require('./constants');
-const readline = require('readline');
 
 const nlp = spacyNLP.nlp;
 const wordnet = new WordNet();
-
-const testMessage = process.argv[2];
-
-console.log(testMessage);
         
 spacyNLP.server(/*{ port: process.env.IOPORT }*/);
 
-const safeStartupTime = 4000; // 15s
-
-console.log('Please wait');
+const safeStartupTime = 4000;
+let ready = false;
 
 const isRelevantPointer = (type, pointer) => {
   const isSameType = constants.posMap[type] === pointer.pos;
@@ -23,14 +19,38 @@ const isRelevantPointer = (type, pointer) => {
   return isSameType && isRelevantSymbol;
 };
 
-const resolvePointers = (type, word) => {
+const getWordnetPointerData = (offset, pos) => wordnet.getAsync(offset, pos);
+
+const flattenRelated = (relatedWords, pointerDistance) => {
+  relatedWords.forEach(w => w.pointerDistance = pointerDistance);
+  const flatList = _.flatten(relatedWords.map(w => flattenRelated(w.relatedWords, pointerDistance + 1)));
+  relatedWords.forEach(w => delete w.relatedWords);
+  return [...relatedWords, ...flatList];
+};
+
+const cleanReport = doc => {
+  doc.fullAnalysis = doc.fullAnalysis.map(w => {
+    const flatRelated = flattenRelated(w.relatedWords, 0)
+    const uniqueRelated = _.uniqWith(flatRelated, (a, b) => a.lemma === b.lemma);
+    w.relatedWords = uniqueRelated.sort((a, b) => a.pointerDistance - b.pointerDistance);
+    return w;
+  });
+  return doc;
+};
+
+const resolvePointers = (type, word, layer) => {
   const pointers = word.ptrs || [];
   const pointerPromises = pointers
     .filter(ptr => isRelevantPointer(type, ptr)) // Remove pointers we are not curious about
-    .map(ptr => wordnet.getAsync(ptr.synsetOffset, ptr.pos).then(p => Promise.resolve(_.pick(p, constants.wordnetKeys))));
+    .map(ptr => getWordnetPointerData(ptr.synsetOffset, ptr.pos));
   return Promise.all(pointerPromises)
+    .then(resolvedPointers => Promise.all(resolvedPointers.map(ptr => resolvePointers(type, ptr, layer + 1))))
     .then(resolvedPointers => {
-      return Promise.resolve(Object.assign(_.pick(word, constants.wordnetKeys), { pointers: resolvedPointers }))
+      cleanedPointers = resolvedPointers.map(ptr => _.pick(ptr, [...constants.wordnetKeys, 'relatedWords']));
+      //word.relatedWords = word.relatedWords || [];
+      word.relatedWords = word.relatedWords === undefined ? cleanedPointers : [...word.relatedWords, ...cleanedPointers];
+      //delete cleanedPointers.relatedWords;
+      return Promise.resolve(_.pick(word, [...constants.wordnetKeys, 'relatedWords']));
     });
 };
 
@@ -43,63 +63,59 @@ const chooseLemma = token => {
 const analyzeToken = word => wordnet.lookupAsync(chooseLemma(word));
 
 const analyzePhrase = phrase => {
-  console.log("analyzePhrase");
   return nlp.parse(phrase)
     .then(output => {
       const phraseWords = output[0].parse_list;
-      console.log(JSON.stringify(phraseWords, null, 2));
       const analysis = {};
       return Promise.all(phraseWords.map(word => {
         return analyzeToken(word)
           .then(wordAnalysis => {
             const pointerPromises = wordAnalysis
               .filter(relatedWord => constants.posMap[word.POS_coarse] === relatedWord.pos)
-              .map(relatedWord => resolvePointers(word.POS_coarse, relatedWord));
+              .map(relatedWord => resolvePointers(word.POS_coarse, relatedWord, 0))
             return Promise.all(pointerPromises)
           })
           .then(resolvedWords => Promise.resolve({ originalWord: word, relatedWords: resolvedWords }));
       }));
     })
-    .then(analysis => {
+    .then(fullAnalysis => {      
       const report = {
         originalMessage: phrase,
-        analysis
+        tokenizedMessage: fullAnalysis.map(token => token.originalWord.lemma),
+        fullAnalysis
       };
-      require('fs').writeFileSync('analysis.json', JSON.stringify(report, null, 2));
-      return Promise.resolve();
+      const cleanedReport = cleanReport(report);
+      const wordsByType = fullAnalysis.reduce((res, w) => {
+          res[w.originalWord.POS_coarse] = [];
+          return res;
+        }
+        , {});
+      fullAnalysis.forEach(word => {
+        const type = word.originalWord.POS_coarse;
+        const existing = wordsByType[type];
+        const newWords = word.relatedWords.map(related => related.lemma);
+        wordsByType[type] = [...existing, ...newWords];
+      });
+
+      return Promise.resolve(Object.assign(cleanedReport, { wordsByType }));
     });
 };
 
-const askAndAnalyze = () => {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+const init = () => {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      ready = true;
+      resolve();
+    }, safeStartupTime);
   });
+};
 
-  rl.question('Next phrase? ', (answer) => {
-    // TODO: Log the answer in a database
-    console.log(`Analyzing: ${answer}`);
-    const start = new Date().getTime();
-    analyzePhrase(answer)
-      .then(() => {
-        console.log('Analysis took', (new Date().getTime() - start) / 1000, 's');
-        askAndAnalyze()
-      });
-    rl.close();
-  });
-}
-
-
-setTimeout(() => {
-  askAndAnalyze();
-}, safeStartupTime);
-
-const test = () => {
-  rl.question('Test? ', (answer) => {
-      // TODO: Log the answer in a database
-      console.log(`Analyzing: ${answer}`);
-      test();    
-    });
-}
-
-// test();
+module.exports = {
+  init,
+  analyzePhrase: (phrase) => {
+    if (!ready) {
+      throw new Error("Not ready");
+    }
+    return analyzePhrase(phrase);
+  }
+};
