@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node example.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bluebird": "^3.5.0",
     "lodash": "^4.17.4",
     "node-wordnet": "^0.1.12",
     "spacy-nlp": "^1.0.7",
