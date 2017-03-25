@@ -19,10 +19,7 @@ module.exports = {
     },
     wordnetKeys: [
         'lemma',
-        'pos',
         'synonyms',
-        'gloss',
-        'def',
-        'exp'
+        'def'
     ]
 }
