@@ -7,16 +7,14 @@ const constants = require('./constants');
 
 const nlp = spacyNLP.nlp;
 const wordnet = new WordNet();
-        
+
 spacyNLP.server(/*{ port: process.env.IOPORT }*/);
 
 const safeStartupTime = 4000;
 let ready = false;
 
 const isRelevantPointer = (type, pointer) => {
-  const isSameType = constants.posMap[type] === pointer.pos;
-  const isRelevantSymbol = _.values(constants.pointerTypes).indexOf(pointer.pointerSymbol) !== -1;
-  return isSameType && isRelevantSymbol;
+  return _.values(constants.pointerTypes).indexOf(pointer.pointerSymbol) !== -1;
 };
 
 const getWordnetPointerData = (offset, pos) => wordnet.getAsync(offset, pos);
@@ -28,11 +26,29 @@ const flattenRelated = (relatedWords, pointerDistance) => {
   return [...relatedWords, ...flatList];
 };
 
+const convertPOS = wnPos => {
+  let foundKey;
+  Object.keys(constants.posMap).forEach(key => {
+    if (constants.posMap[key] === wnPos) {
+      foundKey = key;
+    }
+  });
+  return foundKey;
+};
+
 const cleanReport = doc => {
   doc.fullAnalysis = doc.fullAnalysis.map(w => {
     const flatRelated = flattenRelated(w.relatedWords, 0)
     const uniqueRelated = _.uniqWith(flatRelated, (a, b) => a.lemma === b.lemma);
-    w.relatedWords = uniqueRelated.sort((a, b) => a.pointerDistance - b.pointerDistance);
+    w.relatedWords = uniqueRelated.sort((a, b) => a.pointerDistance - b.pointerDistance).map(word => {
+      const relatedPOS = convertPOS(word.pos);
+      if (relatedPOS === undefined) {
+        return;
+      }
+      word.pos = relatedPOS;
+      return word;
+    }).filter(w => w !== undefined);
+
     return w;
   });
   return doc;
@@ -40,6 +56,10 @@ const cleanReport = doc => {
 
 const resolvePointers = (type, word, layer) => {
   const pointers = word.ptrs || [];
+  if (layer > constants.maxPointerDepth) {
+    word.relatedWords = [];
+    return Promise.resolve(_.pick(word, [...constants.wordnetKeys, 'relatedWords']));
+  }
   const pointerPromises = pointers
     .filter(ptr => isRelevantPointer(type, ptr)) // Remove pointers we are not curious about
     .map(ptr => getWordnetPointerData(ptr.synsetOffset, ptr.pos));
@@ -58,7 +78,7 @@ const chooseLemma = token => {
   // For some reason lemma sometimes contains something like '-PRON-'
   const validLemma = token.lemma !== undefined && token.lemma[0] !== '-';
   return validLemma ? token.lemma : token.word;
-}
+};
 
 const analyzeToken = word => wordnet.lookupAsync(chooseLemma(word));
 
@@ -78,7 +98,7 @@ const analyzePhrase = phrase => {
           .then(resolvedWords => Promise.resolve({ originalWord: word, relatedWords: resolvedWords }));
       }));
     })
-    .then(fullAnalysis => {      
+    .then(fullAnalysis => {
       const report = {
         originalMessage: phrase,
         tokenizedMessage: fullAnalysis.map(token => token.originalWord.lemma),
@@ -90,14 +110,25 @@ const analyzePhrase = phrase => {
           return res;
         }
         , {});
+      const entities = {};
+      _.values(constants.entityTypes).forEach(en => entities[en] = []);
       fullAnalysis.forEach(word => {
-        const type = word.originalWord.POS_coarse;
-        const existing = wordsByType[type];
-        const newWords = word.relatedWords.map(related => related.lemma);
-        wordsByType[type] = [...existing, ...newWords];
+        word.relatedWords.forEach(relatedWord => {
+            const type = relatedWord.pos;
+            if (wordsByType[type] === undefined) {
+                wordsByType[type] = [];
+            }
+            wordsByType[type].push(relatedWord.lemma);
+        });
+
+        const entity = word.originalWord.NE;
+        const entityCategory = constants.entityTypes[entity];
+        if (entityCategory !== undefined) {
+          entities[entityCategory].push(word.originalWord.word);
+        }
       });
 
-      return Promise.resolve(Object.assign(cleanedReport, { wordsByType }));
+      return Promise.resolve(Object.assign(cleanedReport, { wordsByType, entities }));
     });
 };
 
