@@ -15,6 +15,7 @@ Install the requirements for https://github.com/kengz/spacy-nlp
 
 ```shell
 # install spacy in python3
+python3 -m pip install wheel
 python3 -m pip install -U socketIO-client
 python3 -m pip install -U spacy
 python3 -m spacy.en.download
