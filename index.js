@@ -114,12 +114,19 @@ const analyzePhrase = phrase => {
       _.values(constants.entityTypes).forEach(en => entities[en] = []);
       fullAnalysis.forEach(word => {
         word.relatedWords.forEach(relatedWord => {
-            const type = relatedWord.pos;
-            if (wordsByType[type] === undefined) {
-                wordsByType[type] = [];
-            }
-            wordsByType[type].push(relatedWord.lemma);
+
+          const type = relatedWord.pos;
+          if (wordsByType[type] === undefined) {
+              wordsByType[type] = [];
+          }
+          wordsByType[type].push(relatedWord.lemma);
         });
+
+        const type = word.originalWord.POS_coarse;
+        if (wordsByType[type] === undefined) {
+            wordsByType[type] = [];
+        }
+        wordsByType[type].push(word.originalWord.lemma);
 
         const entity = word.originalWord.NE;
         const entityCategory = constants.entityTypes[entity];
