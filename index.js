@@ -26,6 +26,42 @@ const flattenRelated = (relatedWords, pointerDistance) => {
   return [...relatedWords, ...flatList];
 };
 
+const flattenParseTree = (parseTree) => {
+  const relationMap = {};
+  let tokenList = [];
+  parseTree.forEach(token => {
+    const tokenToSave = {
+      word: token.word,
+      lemma: token.lemma,
+      children: [],
+    };
+    tokenList.push(tokenToSave);
+    const childRelations = flattenParseTree(token.modifiers);
+
+    Object.keys(childRelations).forEach(type => {
+      if (relationMap[type] === undefined) {
+          relationMap[type] = [];
+      }
+      childRelations[type] = childRelations[type]
+          .map(childToken => {
+            const finalToken = Object.assign({ parent: tokenToSave.word }, childToken);
+            tokenToSave.children.push(finalToken.word);
+            tokenList.push(finalToken);
+            tokenToSave.combined = [...tokenToSave.children, tokenToSave.word].join(' ');
+            return finalToken;
+          });
+      relationMap[type] = [...relationMap[type], ...childRelations[type]];
+    });
+
+    const relationType = token.arc;
+    if (relationMap[relationType] === undefined) {
+        relationMap[relationType] = [];
+    }
+    relationMap[relationType].push(tokenToSave);
+  });
+  return relationMap;
+};
+
 const convertPOS = wnPos => {
   let foundKey;
   Object.keys(constants.posMap).forEach(key => {
@@ -38,7 +74,7 @@ const convertPOS = wnPos => {
 
 const cleanReport = doc => {
   doc.fullAnalysis = doc.fullAnalysis.map(w => {
-    const flatRelated = flattenRelated(w.relatedWords, 0)
+    const flatRelated = flattenRelated(w.relatedWords, 0);
     const uniqueRelated = _.uniqWith(flatRelated, (a, b) => a.lemma === b.lemma);
     w.relatedWords = uniqueRelated.sort((a, b) => a.pointerDistance - b.pointerDistance).map(word => {
       const relatedPOS = convertPOS(word.pos);
@@ -86,33 +122,38 @@ const analyzePhrase = phrase => {
   return nlp.parse(phrase)
     .then(output => {
       const phraseWords = output[0].parse_list;
-      const analysis = {};
+      const parseTree = output[0].parse_tree;
       return Promise.all(phraseWords.map(word => {
         return analyzeToken(word)
           .then(wordAnalysis => {
             const pointerPromises = wordAnalysis
               .filter(relatedWord => constants.posMap[word.POS_coarse] === relatedWord.pos)
-              .map(relatedWord => resolvePointers(word.POS_coarse, relatedWord, 0))
+              .map(relatedWord => resolvePointers(word.POS_coarse, relatedWord, 0));
             return Promise.all(pointerPromises)
           })
           .then(resolvedWords => Promise.resolve({ originalWord: word, relatedWords: resolvedWords }));
-      }));
+        }))
+        .then(wordList => Promise.resolve({wordList, parseTree}));
     })
     .then(fullAnalysis => {
       const report = {
         originalMessage: phrase,
-        tokenizedMessage: fullAnalysis.map(token => token.originalWord.lemma),
-        fullAnalysis
+        tokenizedMessage: fullAnalysis.wordList.map(token => token.originalWord.lemma),
+        fullAnalysis: fullAnalysis.wordList,
+          parseTree: fullAnalysis.parseTree
       };
       const cleanedReport = cleanReport(report);
-      const wordsByType = fullAnalysis.reduce((res, w) => {
+      const wordsByType = fullAnalysis.wordList.reduce((res, w) => {
           res[w.originalWord.POS_coarse] = [];
           return res;
         }
         , {});
       const entities = {};
       _.values(constants.entityTypes).forEach(en => entities[en] = []);
-      fullAnalysis.forEach(word => {
+
+      report.relationMap = flattenParseTree(fullAnalysis.parseTree);
+
+      fullAnalysis.wordList.forEach(word => {
         word.relatedWords.forEach(relatedWord => {
 
           const type = relatedWord.pos;
@@ -135,6 +176,7 @@ const analyzePhrase = phrase => {
         }
       });
 
+      // require('fs').writeFileSync('analysis.json', JSON.stringify(Object.assign(cleanedReport, { wordsByType, entities }), null, 2));
       return Promise.resolve(Object.assign(cleanedReport, { wordsByType, entities }));
     });
 };
