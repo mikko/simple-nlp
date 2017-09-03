@@ -8,7 +8,15 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node example.js"
+    "start": "node example.js",
+    "lint": "eslint  --fix **/*.js || true",
+    "precommit": "lint-staged"
+  },
+  "lint-staged": {
+    "*.js": [
+      "eslint --fix",
+      "git add"
+    ]
   },
   "author": "",
   "license": "MIT",
@@ -18,5 +26,12 @@
     "node-wordnet": "^0.1.12",
     "spacy-nlp": "^1.0.7",
     "wndb-with-exceptions": "^3.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^4.6.0",
+    "eslint-config-airbnb-base": "^12.0.0",
+    "eslint-plugin-import": "^2.7.0",
+    "husky": "^0.14.3",
+    "lint-staged": "^4.0.4"
   }
 }
