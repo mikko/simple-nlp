@@ -57,6 +57,9 @@ const flattenParseTree = (parseTree) => {
     if (relationMap[relationType] === undefined) {
       relationMap[relationType] = [];
     }
+    if (tokenToSave.combined === undefined) {
+      tokenToSave.combined = tokenToSave.word;
+    }
     relationMap[relationType].push(tokenToSave);
   });
   return relationMap;
