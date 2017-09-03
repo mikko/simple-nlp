@@ -9,7 +9,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node example.js",
-    "lint": "eslint  --fix **/*.js || true",
+    "lint": "eslint  --fix *.js || true",
     "precommit": "lint-staged"
   },
   "lint-staged": {
